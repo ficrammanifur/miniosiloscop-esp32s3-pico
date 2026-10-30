@@ -9,15 +9,14 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Last_Update-October_2026-brightgreen?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/Language-MicroPython-blue?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/Language-Arduino_C%2B%2B-blue?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/Controller-Raspberry_Pi_Pico-informational?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/Generator-ESP32--S3-orange?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/Display-TFT_ST7735-purple?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/Input-ADC_%7C_BNC-green?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/Power-2S_18650-yellow?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/Status-Development-orange?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Project-Mini_Oscilloscope-brightgreen" alt="Project"/>
+  <img src="https://img.shields.io/badge/Language-MicroPython-blue" alt="MicroPython"/>
+  <img src="https://img.shields.io/badge/Language-Arduino-orange" alt="Arduino"/>
+  <img src="https://img.shields.io/badge/Controller-Raspberry_Pi_Pico-informational" alt="Pico"/>
+  <img src="https://img.shields.io/badge/Generator-ESP32--S3-red" alt="ESP32-S3"/>
+  <img src="https://img.shields.io/badge/Display-ST7735-purple" alt="Display"/>
+  <img src="https://img.shields.io/badge/Power-2S_18650-yellow" alt="Power"/>
+  <img src="https://img.shields.io/badge/Status-Development-orange" alt="Status"/>
 </p>
 
 ---
