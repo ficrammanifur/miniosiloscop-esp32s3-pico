@@ -1,4 +1,3 @@
-```markdown
 <h1 align="center">📟 Mini Osiloskop ESP32-S3 + Raspberry Pi Pico</h1>
 
 <p align="center">
@@ -225,6 +224,3 @@ Proyek ini open source di bawah lisensi **MIT**.
   <br><br>
   <a href="#top">⬆ Kembali ke Atas</a>
 </div>
-```
-
-Simpan file ini sebagai `README.md` di root repository.
