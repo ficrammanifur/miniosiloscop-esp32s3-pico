@@ -9,14 +9,15 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/last%20update-October%202026-brightgreen" />
-  <img src="https://img.shields.io/badge/language-MicroPython%20%7C%20Arduino-blue" />
-  <img src="https://img.shields.io/badge/controller-Raspberry%20Pi%20Pico-informational" />
-  <img src="https://img.shields.io/badge/signal%20generator-ESP32--S3-orange" />
-  <img src="https://img.shields.io/badge/display-TFT%20ST7735-purple" />
-  <img src="https://img.shields.io/badge/input-ADC%20%7C%20BNC-green" />
-  <img src="https://img.shields.io/badge/power-2S%2018650-yellow" />
-  <img src="https://img.shields.io/badge/status-Development-orange" />
+  <img src="https://img.shields.io/badge/Last_Update-October_2026-brightgreen?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Language-MicroPython-blue?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Language-Arduino_C%2B%2B-blue?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Controller-Raspberry_Pi_Pico-informational?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Generator-ESP32--S3-orange?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Display-TFT_ST7735-purple?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Input-ADC_%7C_BNC-green?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Power-2S_18650-yellow?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Status-Development-orange?style=for-the-badge" />
 </p>
 
 ---
