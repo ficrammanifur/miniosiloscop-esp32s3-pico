@@ -342,45 +342,55 @@ last_btn = button.value()
 last_enc_time = time.ticks_ms()
 last_btn_time = time.ticks_ms()
 last_rot_time = time.ticks_ms()
+# Variabel tambahan di bagian global (dekat last_clk)
+enc_last_state = (clk.value() << 1) | dt.value()
 
 def read_controls():
     global last_clk, last_enc, last_btn
     global last_enc_time, last_btn_time, last_rot_time
     global time_div_ms, td_index, v_div, vd_index
-    global running, edit_param
+    global running, edit_param, enc_last_state
 
     now = time.ticks_ms()
 
-    # Putar encoder → ubah parameter yang sedang dipilih
-    current_clk = clk.value()
-    if current_clk != last_clk and current_clk == 0:
-        if time.ticks_diff(now, last_rot_time) > 2:
-            direction = 1 if dt.value() != current_clk else -1
+    # ===== Encoder sangat sensitif (setiap perubahan state dihitung) =====
+    state = (clk.value() << 1) | dt.value()
 
+    if state != enc_last_state:
+        # Tabel transisi kuadratur sederhana
+        # 00→01→11→10→00 = satu arah
+        # 00→10→11→01→00 = arah sebaliknya
+        transition = (enc_last_state << 2) | state
+
+        direction = 0
+        if transition in (0b0001, 0b0111, 0b1110, 0b1000):
+            direction = 1          # putar kanan
+        elif transition in (0b0010, 0b1011, 0b1101, 0b0100):
+            direction = -1         # putar kiri
+
+        if direction != 0 and time.ticks_diff(now, last_rot_time) > 0:
             if edit_param == 0:
-                # Edit Time/Div
                 td_index = max(0, min(len(time_div_list) - 1, td_index + direction))
                 time_div_ms = time_div_list[td_index]
             else:
-                # Edit V/Div
                 vd_index = max(0, min(len(v_div_list) - 1, vd_index + direction))
                 v_div = v_div_list[vd_index]
-
             last_rot_time = now
-    last_clk = current_clk
 
-    # Tekan encoder → ganti parameter (Time/Div ↔ V/Div)
+        enc_last_state = state
+
+    # ===== Tekan encoder → ganti Time/Div ↔ V/Div =====
     current_enc = enc_sw.value()
     if current_enc == 0 and last_enc == 1:
-        if time.ticks_diff(now, last_enc_time) > 180:
+        if time.ticks_diff(now, last_enc_time) > 150:
             edit_param = 1 - edit_param
             last_enc_time = now
     last_enc = current_enc
 
-    # Tombol → RUN / HOLD
+    # ===== Tombol → RUN / HOLD =====
     current_btn = button.value()
     if current_btn == 0 and last_btn == 1:
-        if time.ticks_diff(now, last_btn_time) > 180:
+        if time.ticks_diff(now, last_btn_time) > 150:
             running = not running
             last_btn_time = now
     last_btn = current_btn
@@ -395,10 +405,12 @@ calculate_measurements()
 render()
 
 while True:
-    read_controls()
+    read_controls()          # sebelum sampling
 
     if running:
         sample_adc()
         calculate_measurements()
 
+    read_controls()          # sesudah sampling
     render()
+    read_controls()          # sesudah render
