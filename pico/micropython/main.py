@@ -5,7 +5,7 @@ import math
 
 # ==========================================
 # RASPBERRY PI PICO - REAL MINI OSCILLOSCOPE
-# Scaling lebih agresif (cocok untuk resistor 5k5)
+# Mode Wave / Square (tanpa teks mode di layar)
 # ==========================================
 W = 160
 H = 128
@@ -154,6 +154,7 @@ def update_led():
 # SETTINGS
 # ==========================================
 running = True
+wave_mode = 0          # 0 = Wave, 1 = Square
 
 timebase_us = 0
 timebase_list = [0, 20, 50, 100, 200, 500, 1000, 2000]
@@ -165,6 +166,7 @@ vd_index = 2
 
 SAMPLES = 160
 samples = [0.0] * SAMPLES
+capture_time_s = 0.0
 
 meas = {
     "max": 0.0, "min": 0.0, "vpp": 0.0,
@@ -177,17 +179,21 @@ GW, GH = 160, 74
 CENTER_Y = Y0 + GH // 2
 
 # ==========================================
-# ADC
+# ADC SAMPLING
 # ==========================================
 def sample_adc():
-    global samples
+    global samples, capture_time_s
     raw = []
-    delay = timebase_us
+    start = time.ticks_us()
+
     for _ in range(SAMPLES):
         val = adc.read_u16()
         raw.append((val / 65535.0) * 3.3)
-        if delay > 0:
-            time.sleep_us(delay)
+        if timebase_us > 0:
+            time.sleep_us(timebase_us)
+
+    end = time.ticks_us()
+    capture_time_s = time.ticks_diff(end, start) / 1_000_000.0
     samples = raw
 
 def calculate_measurements():
@@ -198,7 +204,7 @@ def calculate_measurements():
     mx = max(samples)
     avg = sum(samples) / len(samples)
 
-    sq = sum(s*s for s in samples) / len(samples)
+    sq = sum(s * s for s in samples) / len(samples)
     rms = math.sqrt(sq)
 
     high = sum(1 for s in samples if s >= avg)
@@ -210,10 +216,7 @@ def calculate_measurements():
         if samples[i-1] < mid and samples[i] >= mid:
             rising += 1
 
-    if timebase_us == 0:
-        total_s = 0.002
-    else:
-        total_s = (timebase_us * SAMPLES) / 1_000_000.0
+    total_s = capture_time_s
 
     if rising > 0 and total_s > 0:
         freq = rising / total_s
@@ -257,46 +260,51 @@ def draw_wave():
     if not samples:
         return
 
-    # ===== AKALIN BIAR GELOMBANG LEBIH BESAR =====
-    # Kita pakai Vpp aktual + faktor zoom dari v_div
-
-    vpp = max(meas["vpp"], 0.05)          # minimal 50 mV biar tidak error
-
-    # Target: gelombang mengisi kira-kira 70% tinggi grafik
+    vpp = max(meas["vpp"], 0.05)
     target_pixels = GH * 0.70
-
-    # Base scale dari Vpp
     base_scale = target_pixels / vpp
-
-    # v_div masih bisa dipakai untuk zoom manual
-    # v_div kecil = lebih zoom
-    zoom = 0.6 / max(v_div, 0.05)         # semakin kecil v_div, semakin besar
-
-    pixels_per_volt = base_scale * zoom
-
-    # Batasi biar tidak terlalu gila
-    if pixels_per_volt > 120:
-        pixels_per_volt = 120
-    if pixels_per_volt < 8:
-        pixels_per_volt = 8
+    zoom = 0.6 / max(v_div, 0.05)
+    pixels_per_volt = max(8, min(120, base_scale * zoom))
 
     center_v = meas["avg"]
 
-    prev_y = None
-    for i, v in enumerate(samples):
-        y = int(CENTER_Y - (v - center_v) * pixels_per_volt)
-        y = max(Y0 + 1, min(Y0 + GH - 2, y))
+    if wave_mode == 0:
+        # MODE WAVE (asli)
+        prev_y = None
+        for i, v in enumerate(samples):
+            y = int(CENTER_Y - (v - center_v) * pixels_per_volt)
+            y = max(Y0 + 1, min(Y0 + GH - 2, y))
+            if prev_y is not None:
+                fb.line(X0 + i - 1, prev_y, X0 + i, y, WAVE)
+            prev_y = y
+    else:
+        # MODE SQUARE (digital)
+        threshold = center_v
+        high_y = CENTER_Y - GH // 3
+        low_y  = CENTER_Y + GH // 3
 
-        if prev_y is not None:
-            fb.line(X0 + i - 1, prev_y, X0 + i, y, WAVE)
-        prev_y = y
+        prev_state = samples[0] >= threshold
+        prev_y = high_y if prev_state else low_y
+
+        for i in range(1, len(samples)):
+            curr_state = samples[i] >= threshold
+            curr_y = high_y if curr_state else low_y
+
+            fb.hline(X0 + i - 1, prev_y, 1, WAVE)
+
+            if curr_state != prev_state:
+                y1 = min(prev_y, curr_y)
+                y2 = max(prev_y, curr_y)
+                fb.vline(X0 + i, y1, y2 - y1 + 1, WAVE)
+
+            prev_state = curr_state
+            prev_y = curr_y
 
 def draw_bottom():
     fb.fill_rect(0, 100, W, 28, BLACK)
     fb.hline(0, 99, W, DARK)
 
-    tb_ms = (timebase_us * 32) / 1000.0 if timebase_us > 0 else 0
-
+    # Duty cycle tetap ditampilkan
     draw_text(2, 103, "Dty:{:.0f}%".format(meas["dty"]), CYAN)
     draw_text(2, 113, "{:.1f}V/div".format(v_div), GRAY)
 
@@ -311,6 +319,7 @@ def draw_bottom():
     if timebase_us == 0:
         draw_text(100, 113, "FAST", GRAY)
     else:
+        tb_ms = (timebase_us * 32) / 1000.0
         draw_text(100, 113, "{:.0f}ms/div".format(tb_ms), GRAY)
 
 def render():
@@ -334,10 +343,11 @@ last_rot_time = time.ticks_ms()
 def read_controls():
     global last_clk, last_enc, last_btn
     global last_enc_time, last_btn_time, last_rot_time
-    global timebase_us, tb_index, running, v_div, vd_index
+    global timebase_us, tb_index, running, v_div, vd_index, wave_mode
 
     now = time.ticks_ms()
 
+    # Putar encoder → Timebase
     current_clk = clk.value()
     if current_clk != last_clk and current_clk == 0:
         if time.ticks_diff(now, last_rot_time) > 3:
@@ -349,14 +359,15 @@ def read_controls():
             last_rot_time = now
     last_clk = current_clk
 
+    # Tekan encoder → ganti mode Wave / Square
     current_enc = enc_sw.value()
     if current_enc == 0 and last_enc == 1:
         if time.ticks_diff(now, last_enc_time) > 180:
-            vd_index = (vd_index + 1) % len(v_div_list)
-            v_div = v_div_list[vd_index]
+            wave_mode = (wave_mode + 1) % 2
             last_enc_time = now
     last_enc = current_enc
 
+    # Push button → RUN / HOLD
     current_btn = button.value()
     if current_btn == 0 and last_btn == 1:
         if time.ticks_diff(now, last_btn_time) > 180:
