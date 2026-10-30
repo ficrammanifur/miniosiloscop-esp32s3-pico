@@ -18,6 +18,7 @@
   <img src="https://img.shields.io/badge/power-2S%2018650-yellow" />
   <img src="https://img.shields.io/badge/status-Development-orange" />
 </p>
+
 ---
 
 ## 📑 Table of Contents
