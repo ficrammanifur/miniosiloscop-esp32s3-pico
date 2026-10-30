@@ -1,4 +1,4 @@
-<h1 align="center">📟 Mini Osiloskop ESP32-S3 + Raspberry Pi Pico</h1>
+<h1 align="center">🔬 DIY PORTABLE MINI OSCILLOSCOPE</h1>
 
 <p align="center">
   <img src="assets/depan.jpeg" alt="Mini Osiloskop Preview" width="700"/>
@@ -9,13 +9,15 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Platform-Raspberry%20Pi%20Pico-green" />
-  <img src="https://img.shields.io/badge/Language-MicroPython-blue" />
-  <img src="https://img.shields.io/badge/Display-ST7735%20160x128-orange" />
-  <img src="https://img.shields.io/badge/Signal%20Generator-ESP32--S3-red" />
-  <img src="https://img.shields.io/badge/Status-Active-success" />
+  <img src="https://img.shields.io/badge/last%20update-October%202026-brightgreen" />
+  <img src="https://img.shields.io/badge/language-MicroPython%20%7C%20Arduino-blue" />
+  <img src="https://img.shields.io/badge/controller-Raspberry%20Pi%20Pico-informational" />
+  <img src="https://img.shields.io/badge/signal%20generator-ESP32--S3-orange" />
+  <img src="https://img.shields.io/badge/display-TFT%20ST7735-purple" />
+  <img src="https://img.shields.io/badge/input-ADC%20%7C%20BNC-green" />
+  <img src="https://img.shields.io/badge/power-2S%2018650-yellow" />
+  <img src="https://img.shields.io/badge/status-Development-orange" />
 </p>
-
 ---
 
 ## 📑 Table of Contents
