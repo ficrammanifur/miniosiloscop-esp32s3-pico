@@ -1,15 +1,40 @@
-from machine import Pin, SPI, PWM, ADC
+from machine import Pin, SPI, PWM, ADC, WDT, disable_irq, enable_irq
+import machine
 import framebuf
 import time
 import math
+import sys
+from array import array
 
-# ==========================================
-# RASPBERRY PI PICO - REAL MINI OSCILLOSCOPE
-# Gelombang = data ADC asli
-# Time/Div & V/Div benar-benar berfungsi
-# ==========================================
+machine.freq(200_000_000)   # overclock (hapus kalau tidak mau)
+
+# ================= OPSI =================
+INVERT     = False   # False = background hitam (coba True kalau warna terbalik)
+ENC_DIV    = 2       # 1 = super sensitif, 2 = sedang, 4 = 1 klik 1 langkah
+ENC_REV    = False   # True kalau arah putar terbalik
+SMOOTH     = False   #True    haluskan gelombang (moving average 3 titik)
+THICK      = True    # garis gelombang lebih tebal
+USE_WDT    = False   # True = watchdog aktif (nyalakan setelah program stabil)
+AUTO_RESET = False   # True = restart otomatis kalau error (nyalakan setelah stabil)
+# ========================================
+
 W = 160
 H = 128
+
+def c(v):   # tukar byte warna sekali saja -> tanpa loop swap di show()
+    return ((v & 0xFF) << 8) | (v >> 8)
+
+BLACK  = c(0x0000)
+WHITE  = c(0xFFFF)
+CYAN   = c(0x07FF)
+GREEN  = c(0x07E0)
+YELLOW = c(0xFFE0)
+RED    = c(0xF800)
+GRAY   = c(0x7BEF)
+DARK   = c(0x2104)
+WAVE   = c(0x07FF)
+G_CTR  = c(0x03E0)
+G_MID  = c(0x4208)
 
 tft = SPI(0, baudrate=30_000_000, polarity=0, phase=0,
           sck=Pin(18), mosi=Pin(19), miso=None)
@@ -30,21 +55,8 @@ adc = ADC(26)
 
 buf = bytearray(W * H * 2)
 fb  = framebuf.FrameBuffer(buf, W, H, framebuf.RGB565)
-display_buf = bytearray(W * H * 2)
 
-BLACK  = 0x0000
-WHITE  = 0xFFFF
-CYAN   = 0x07FF
-GREEN  = 0x07E0
-YELLOW = 0xFFE0
-RED    = 0xF800
-GRAY   = 0x7BEF
-DARK   = 0x2104
-WAVE   = 0x07FF
-
-# ==========================================
-# FONT 4x6
-# ==========================================
+# ================= FONT 4x6 =================
 FONT4 = {
     '0':[0x1E,0x29,0x25,0x1E],'1':[0x00,0x22,0x3F,0x20],'2':[0x32,0x29,0x25,0x22],
     '3':[0x11,0x21,0x25,0x1B],'4':[0x0C,0x0A,0x3F,0x08],'5':[0x17,0x25,0x25,0x19],
@@ -69,29 +81,26 @@ FONT4 = {
     'y':[0x0C,0x28,0x28,0x1C],'z':[0x22,0x32,0x2A,0x26],
     '.':[0x00,0x30,0x30,0x00],':':[0x00,0x12,0x12,0x00],'-':[0x08,0x08,0x08,0x08],
     ' ':[0x00,0x00,0x00,0x00],'%':[0x23,0x13,0x08,0x64],'/':[0x20,0x10,0x08,0x04],
+    '>':[0x00,0x22,0x14,0x08],
 }
 
 def draw_text(x, y, text, color):
     for ch in text:
         glyph = FONT4.get(ch, FONT4[' '])
-        for c, bits in enumerate(glyph):
+        for col, bits in enumerate(glyph):
             for r in range(6):
                 if bits & (1 << r):
-                    fb.pixel(x + c, y + r, color)
+                    fb.pixel(x + col, y + r, color)
         x += len(glyph) + 1
 
-# ==========================================
-# TFT DRIVER
-# ==========================================
+# ================= TFT DRIVER =================
 def command(cmd):
-    cs.value(0)
-    dc.value(0)
+    cs.value(0); dc.value(0)
     tft.write(bytes([cmd]))
     cs.value(1)
 
 def data(dat):
-    cs.value(0)
-    dc.value(1)
+    cs.value(0); dc.value(1)
     tft.write(dat)
     cs.value(1)
 
@@ -117,150 +126,128 @@ def init_tft():
     data(bytes([0x04,0x22,0x07,0x0A,0x2E,0x30,0x25,0x2A,0x28,0x26,0x2E,0x3A,0x00,0x01,0x03,0x13]))
     command(0xE1)
     data(bytes([0x04,0x16,0x06,0x0D,0x2D,0x26,0x23,0x27,0x27,0x25,0x2D,0x3B,0x00,0x01,0x04,0x13]))
-    command(0x21)
+    command(0x21 if INVERT else 0x20)
     command(0x29)
     time.sleep_ms(40)
 
 def show():
-    command(0x2A)
-    data(b'\x00\x00\x00\x9F')
-    command(0x2B)
-    data(b'\x00\x00\x00\x7F')
+    command(0x2A); data(b'\x00\x00\x00\x9F')
+    command(0x2B); data(b'\x00\x00\x00\x7F')
     command(0x2C)
-
-    for i in range(0, len(buf), 2):
-        display_buf[i]     = buf[i + 1]
-        display_buf[i + 1] = buf[i]
-
-    dc.value(1)
-    cs.value(0)
-    tft.write(display_buf)
+    dc.value(1); cs.value(0)
+    tft.write(buf)
     cs.value(1)
 
-# ==========================================
-# RGB LED
-# ==========================================
+# ================= LED =================
 def set_rgb(r, g, b, br=1.0):
     led_r.duty_u16(int(r * br) * 257)
     led_g.duty_u16(int(g * br) * 257)
     led_b.duty_u16(int(b * br) * 257)
 
 def update_led():
-    if running:
-        set_rgb(0, 220, 80, 0.75)
-    else:
-        set_rgb(180, 40, 0, 0.35)
+    if running: set_rgb(0, 220, 80, 0.75)
+    else:       set_rgb(180, 40, 0, 0.35)
 
-# ==========================================
-# SETTINGS
-# ==========================================
-running = True
-
-# Parameter yang sedang diedit: 0 = Time/Div, 1 = V/Div
+# ================= SETTINGS =================
+running    = True
 edit_param = 0
+ui_dirty   = True
+frame      = 0
 
-# Time/Div (ms per divisi horizontal)
-# Grid: 5 div horizontal (160px / 32px)
-time_div_list = [0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0]  # ms/div
-td_index = 3          # default 1.0 ms/div
+time_div_list = [0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0]
+td_index = 3
 time_div_ms = time_div_list[td_index]
 
-# V/Div
-v_div_list = [0.1, 0.2, 0.5, 1.0, 2.0]
-vd_index = 2
+v_div_list = [0.05, 0.1, 0.2, 0.5, 1.0, 2.0]
+vd_index = 3
 v_div = v_div_list[vd_index]
 
 SAMPLES = 160
+EXTRA   = 80
+BUF_N   = SAMPLES + EXTRA
+raw     = array('H', [0] * BUF_N)
 samples = [0.0] * SAMPLES
-capture_time_s = 0.0
+window_s = 0.001
 
-meas = {
-    "max": 0.0, "min": 0.0, "vpp": 0.0,
-    "avg": 0.0, "rms": 0.0, "dty": 50.0,
-    "frq": 0.0, "per": 0.0
-}
+meas = {"max":0.0,"min":0.0,"vpp":0.0,"avg":0.0,"rms":0.0,"dty":50.0,"frq":0.0,"per":0.0}
 
 X0, Y0 = 0, 24
 GW, GH = 160, 74
 CENTER_Y = Y0 + GH // 2
-PX_PER_DIV_V = 18     # vertikal
-PX_PER_DIV_H = 32     # horizontal
-H_DIVS = 5            # 160 / 32 = 5 div
+PX_PER_DIV_V = 18
+PX_PER_DIV_H = 32
+H_DIVS = 5
 
-# ==========================================
-# ADC SAMPLING (tanpa read_controls di dalam loop)
-# ==========================================
+# ================= SAMPLING + TRIGGER =================
 def sample_adc():
-    global samples, capture_time_s
+    global samples, window_s
 
-    # Hitung interval sampling dari Time/Div
-    # Total waktu di layar = H_DIVS * time_div_ms (ms)
     total_time_ms = H_DIVS * time_div_ms
     interval_us = int((total_time_ms * 1000) / SAMPLES)
-    if interval_us < 5:
-        interval_us = 5
+    read = adc.read_u16
+    sleep = time.sleep_us
 
-    raw = []
-    start = time.ticks_us()
+    t0 = time.ticks_us()
+    if interval_us > 20:
+        for i in range(BUF_N):
+            raw[i] = read()
+            sleep(interval_us - 15)
+    else:
+        for i in range(BUF_N):
+            raw[i] = read()
+    t1 = time.ticks_us()
 
-    for _ in range(SAMPLES):
-        val = adc.read_u16()
-        raw.append((val / 65535.0) * 3.3)
-        if interval_us > 0:
-            time.sleep_us(interval_us)
+    per_sample = time.ticks_diff(t1, t0) / 1_000_000.0 / BUF_N
+    window_s = per_sample * SAMPLES
 
-    end = time.ticks_us()
-    capture_time_s = time.ticks_diff(end, start) / 1_000_000.0
-    samples = raw
+    mn = min(raw); mx = max(raw)
+    mid = (mn + mx) >> 1
+    start = 0
+    for i in range(1, EXTRA):
+        if raw[i-1] < mid <= raw[i]:
+            start = i
+            break
+
+    k = 3.3 / 65535.0
+    v = [raw[start + i] * k for i in range(SAMPLES)]
+
+    if SMOOTH:
+        s = [v[0]]
+        for i in range(1, SAMPLES - 1):
+            s.append((v[i-1] + 2 * v[i] + v[i+1]) * 0.25)
+        s.append(v[-1])
+        v = s
+    samples = v
 
 def calculate_measurements():
-    if not samples:
-        return
-
-    mn = min(samples)
-    mx = max(samples)
-    avg = sum(samples) / len(samples)
-
-    sq = sum(s * s for s in samples) / len(samples)
-    rms = math.sqrt(sq)
-
+    mn = min(samples); mx = max(samples)
+    avg = sum(samples) / SAMPLES
+    rms = math.sqrt(sum(s * s for s in samples) / SAMPLES)
     high = sum(1 for s in samples if s >= avg)
-    dty = (high / len(samples)) * 100.0
 
-    # Frekuensi dari rising edge
     mid = (mn + mx) / 2.0
     rising = 0
-    for i in range(1, len(samples)):
-        if samples[i-1] < mid and samples[i] >= mid:
+    for i in range(1, SAMPLES):
+        if samples[i-1] < mid <= samples[i]:
             rising += 1
 
-    total_s = capture_time_s if capture_time_s > 0 else 0.001
-
-    if rising > 0 and total_s > 0:
-        freq = rising / total_s
-        period_ms = 1000.0 / freq
+    if rising > 0:
+        freq = rising / window_s
+        per = 1000.0 / freq
     else:
-        freq = 0.0
-        period_ms = 0.0
+        freq = 0.0; per = 0.0
 
-    meas["max"] = mx
-    meas["min"] = mn
-    meas["vpp"] = mx - mn
-    meas["avg"] = avg
-    meas["rms"] = rms
-    meas["dty"] = dty
-    meas["frq"] = freq
-    meas["per"] = period_ms
+    meas["max"] = mx; meas["min"] = mn; meas["vpp"] = mx - mn
+    meas["avg"] = avg; meas["rms"] = rms
+    meas["dty"] = high * 100.0 / SAMPLES
+    meas["frq"] = freq; meas["per"] = per
 
-# ==========================================
-# DRAWING
-# ==========================================
+# ================= DRAWING =================
 def draw_top():
     fb.fill_rect(0, 0, W, 23, BLACK)
     draw_text(2,  2, "Max:{:.2f}V".format(meas["max"]), WHITE)
     draw_text(2, 10, "Min:{:.2f}V".format(meas["min"]), WHITE)
     draw_text(2, 18, "Frq:{:.1f}Hz".format(meas["frq"]), CYAN)
-
     draw_text(88,  2, "Vpp:{:.2f}V".format(meas["vpp"]), WHITE)
     draw_text(88, 10, "Avg:{:.2f}V".format(meas["avg"]), WHITE)
     draw_text(88, 18, "Per:{:.1f}ms".format(meas["per"]), CYAN)
@@ -271,146 +258,148 @@ def draw_grid():
         fb.vline(x, Y0, GH, DARK)
     for y in range(Y0, Y0 + GH, PX_PER_DIV_V):
         fb.hline(X0, y, GW, DARK)
-    fb.hline(X0, CENTER_Y, GW, 0x03E0)
-    fb.vline(X0 + GW // 2, Y0, GH, 0x4208)
+    fb.hline(X0, CENTER_Y, GW, G_CTR)
+    fb.vline(X0 + GW // 2, Y0, GH, G_MID)
 
 def draw_wave():
-    """Gambar gelombang dari data ADC asli"""
-    if not samples:
-        return
-
-    # V/div yang benar: 1 div = PX_PER_DIV_V pixel
-    pixels_per_volt = PX_PER_DIV_V / max(v_div, 0.05)
-    center_v = meas["avg"]          # auto-center ke rata-rata
-
+    ppv = PX_PER_DIV_V / v_div
+    cv = meas["avg"]
+    ymin = Y0 + 1
+    ymax = Y0 + GH - 3
     prev_y = None
-    for i, v in enumerate(samples):
-        y = int(CENTER_Y - (v - center_v) * pixels_per_volt)
-        y = max(Y0 + 1, min(Y0 + GH - 2, y))
-
+    for i in range(SAMPLES):
+        y = int(CENTER_Y - (samples[i] - cv) * ppv)
+        if y < ymin: y = ymin
+        elif y > ymax: y = ymax
         if prev_y is not None:
             fb.line(X0 + i - 1, prev_y, X0 + i, y, WAVE)
+            if THICK:
+                fb.line(X0 + i - 1, prev_y + 1, X0 + i, y + 1, WAVE)
         prev_y = y
 
 def draw_bottom():
     fb.fill_rect(0, 100, W, 28, BLACK)
     fb.hline(0, 99, W, DARK)
-
-    # Kiri: Duty + V/div
     draw_text(2, 103, "Dty:{:.0f}%".format(meas["dty"]), CYAN)
-    # Tampilkan V/div, beri tanda jika sedang diedit
-    if edit_param == 1:
-        draw_text(2, 113, ">{:.1f}V/div".format(v_div), YELLOW)
-    else:
-        draw_text(2, 113, "{:.1f}V/div".format(v_div), GRAY)
+    if edit_param == 1: draw_text(2, 113, ">{:.2f}V/div".format(v_div), YELLOW)
+    else:               draw_text(2, 113, "{:.2f}V/div".format(v_div), GRAY)
 
-    # Tengah: RUN/HOLD
     if running:
         fb.fill_rect(66, 102, 28, 11, GREEN)
         draw_text(71, 104, "RUN", BLACK)
     else:
         fb.fill_rect(66, 102, 28, 11, RED)
         draw_text(68, 104, "HOLD", WHITE)
+    draw_text(64, 115, "T/DIV" if edit_param == 0 else "V/DIV", YELLOW)
 
-    # Mode edit di bawah RUN
-    if edit_param == 0:
-        draw_text(64, 115, "T/DIV", YELLOW)
-    else:
-        draw_text(64, 115, "V/DIV", YELLOW)
-
-    # Kanan: RMS + Time/Div
     draw_text(100, 103, "Rms:{:.2f}V".format(meas["rms"]), YELLOW)
-    if edit_param == 0:
-        draw_text(100, 113, ">{:.1f}ms".format(time_div_ms), YELLOW)
-    else:
-        draw_text(100, 113, "{:.1f}ms/div".format(time_div_ms), GRAY)
+    if edit_param == 0: draw_text(100, 113, ">{:.1f}ms".format(time_div_ms), YELLOW)
+    else:               draw_text(100, 113, "{:.1f}ms/div".format(time_div_ms), GRAY)
 
 def render():
-    draw_top()
+    global frame, ui_dirty
+    frame += 1
+    if ui_dirty or frame % 4 == 0:
+        draw_top()
+        draw_bottom()
+        ui_dirty = False
     draw_grid()
     draw_wave()
-    draw_bottom()
     show()
-    update_led()
 
-# ==========================================
-# INPUT
-# ==========================================
-last_clk = clk.value()
-last_enc = enc_sw.value()
-last_btn = button.value()
-last_enc_time = time.ticks_ms()
-last_btn_time = time.ticks_ms()
-last_rot_time = time.ticks_ms()
-# Variabel tambahan di bagian global (dekat last_clk)
-enc_last_state = (clk.value() << 1) | dt.value()
+# ================= INPUT (INTERRUPT) =================
+ENC_TABLE = (0,1,-1,0, -1,0,0,1, 1,0,0,-1, 0,-1,1,0)
+enc_state = (clk.value() << 1) | dt.value()
+enc_count = 0
+btn_flag = False
+esw_flag = False
+last_btn_t = time.ticks_ms()
+last_esw_t = time.ticks_ms()
 
-def read_controls():
-    global last_clk, last_enc, last_btn
-    global last_enc_time, last_btn_time, last_rot_time
-    global time_div_ms, td_index, v_div, vd_index
-    global running, edit_param, enc_last_state
+def enc_isr(pin):
+    global enc_state, enc_count
+    s = (clk.value() << 1) | dt.value()
+    enc_count += ENC_TABLE[(enc_state << 2) | s]
+    enc_state = s
 
+def btn_isr(pin):
+    global btn_flag, last_btn_t
     now = time.ticks_ms()
+    if time.ticks_diff(now, last_btn_t) > 200:
+        btn_flag = True
+        last_btn_t = now
 
-    # ===== Encoder sangat sensitif (setiap perubahan state dihitung) =====
-    state = (clk.value() << 1) | dt.value()
+def esw_isr(pin):
+    global esw_flag, last_esw_t
+    now = time.ticks_ms()
+    if time.ticks_diff(now, last_esw_t) > 200:
+        esw_flag = True
+        last_esw_t = now
 
-    if state != enc_last_state:
-        # Tabel transisi kuadratur sederhana
-        # 00→01→11→10→00 = satu arah
-        # 00→10→11→01→00 = arah sebaliknya
-        transition = (enc_last_state << 2) | state
+both = Pin.IRQ_FALLING | Pin.IRQ_RISING
+clk.irq(trigger=both, handler=enc_isr)
+dt.irq(trigger=both, handler=enc_isr)
+button.irq(trigger=Pin.IRQ_FALLING, handler=btn_isr)
+enc_sw.irq(trigger=Pin.IRQ_FALLING, handler=esw_isr)
 
-        direction = 0
-        if transition in (0b0001, 0b0111, 0b1110, 0b1000):
-            direction = 1          # putar kanan
-        elif transition in (0b0010, 0b1011, 0b1101, 0b0100):
-            direction = -1         # putar kiri
+def handle_inputs():
+    global enc_count, btn_flag, esw_flag
+    global td_index, time_div_ms, vd_index, v_div
+    global running, edit_param, ui_dirty
 
-        if direction != 0 and time.ticks_diff(now, last_rot_time) > 0:
-            if edit_param == 0:
-                td_index = max(0, min(len(time_div_list) - 1, td_index + direction))
-                time_div_ms = time_div_list[td_index]
-            else:
-                vd_index = max(0, min(len(v_div_list) - 1, vd_index + direction))
-                v_div = v_div_list[vd_index]
-            last_rot_time = now
+    irq = disable_irq()
+    n = enc_count
+    steps = int(n / ENC_DIV)
+    enc_count -= steps * ENC_DIV
+    b = btn_flag; btn_flag = False
+    e = esw_flag; esw_flag = False
+    enable_irq(irq)
 
-        enc_last_state = state
+    if steps:
+        if ENC_REV: steps = -steps
+        if edit_param == 0:
+            td_index = max(0, min(len(time_div_list) - 1, td_index + steps))
+            time_div_ms = time_div_list[td_index]
+        else:
+            vd_index = max(0, min(len(v_div_list) - 1, vd_index + steps))
+            v_div = v_div_list[vd_index]
+        ui_dirty = True
 
-    # ===== Tekan encoder → ganti Time/Div ↔ V/Div =====
-    current_enc = enc_sw.value()
-    if current_enc == 0 and last_enc == 1:
-        if time.ticks_diff(now, last_enc_time) > 150:
-            edit_param = 1 - edit_param
-            last_enc_time = now
-    last_enc = current_enc
+    if e:
+        edit_param = 1 - edit_param
+        ui_dirty = True
+    if b:
+        running = not running
+        update_led()
+        ui_dirty = True
 
-    # ===== Tombol → RUN / HOLD =====
-    current_btn = button.value()
-    if current_btn == 0 and last_btn == 1:
-        if time.ticks_diff(now, last_btn_time) > 150:
-            running = not running
-            last_btn_time = now
-    last_btn = current_btn
+# ================= MAIN (HARUS PALING BAWAH) =================
+def main():
+    global running
+    running = True                      # selalu mulai dalam mode RUN
 
-# ==========================================
-# MAIN
-# ==========================================
-init_tft()
-
-sample_adc()
-calculate_measurements()
-render()
-
-while True:
-    read_controls()          # sebelum sampling
-
-    if running:
-        sample_adc()
-        calculate_measurements()
-
-    read_controls()          # sesudah sampling
+    init_tft()
+    update_led()
+    sample_adc()
+    calculate_measurements()
     render()
-    read_controls()          # sesudah render
+
+    wdt = WDT(timeout=5000) if USE_WDT else None
+
+    while True:
+        handle_inputs()
+        if running:
+            sample_adc()
+            calculate_measurements()
+        handle_inputs()
+        render()
+        if wdt:
+            wdt.feed()
+
+try:
+    main()
+except Exception as e:
+    sys.print_exception(e)              # tampilkan error lengkap di Thonny
+    if AUTO_RESET:
+        time.sleep_ms(500)
+        machine.reset()
